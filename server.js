@@ -1,7 +1,11 @@
+require("dotenv").config()
+const cookieParser = require("cookie-parser")
+const jwt = require("jsonwebtoken")
 const bcrypt = require("bcrypt")
-const express = require("express");
+const express = require("express")
 const db = require("better-sqlite3")("ourApp.db")
 db.pragma("journal_mode = WAL")
+
 
 // database set up starts here
 
@@ -25,21 +29,83 @@ const app = express();
 app.set("view engine", "ejs");
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static("public"));
+app.use(cookieParser())
 
 // setting up middleware
 app.use(function (req, res, next) {
     res.locals.errors = []
+    // try to decode incoming cookie
 
+    try {
+        const decoded = jwt.verify(req.cookies.ourSimpleApp, process.env.JWTSECRET)
+        req.user = decoded
+
+    } catch(err) {
+        req.user = false
+    }
+
+    res.locals.user = req.user
+    console.log(req.user)
     next()
 })
 
 app.get("/", (req, res) => {
+    if (req.user) {
+        return res.render("dashboard")
+    }
     res.render("homepage", { errors: [] }); // Ensure errors is always defined
 });
 
 app.get("/login", (req, res) => {
     res.render("login");
 });
+
+app.get("/logout", (req, res) => {
+    res.clearCookie("ourSimpleApp")
+    res.redirect("/")
+})
+
+app.post("/login", (req, res) => {
+    let errors = [];
+
+    if (typeof req.body.username !== "string") req.body.username = "";
+    if (typeof req.body.password !== "string") req.body.password = "";
+
+    if (req.body.username.trim() == "") errors = ["Invalid username / password."]
+    if (req.body.password == "") errors = ["Invalid username / password."]
+
+        if (errors.length) {
+            return res.render("login", { errors })
+        }
+
+        const userInQuestionStatement = db.prepare("SELECT * FROM users WHERE USERNAME = ?")
+        const userInQuestion = userInQuestionStatement.get(req.body.username)
+
+        if (!userInQuestion) {
+            errors = ["Invalid username / password."]
+            return res.render("login", { errors })
+        }
+
+        const matchOrNot = bcrypt.compareSync(req.body.password, userInQuestion.password)
+        if (!matchOrNot) {
+            errors = ["Invalid username / password."]
+            return res.render("login", { errors })
+        }
+
+        // if its true give them a cookie and redirect them to the home page
+        const ourTokenValue = jwt.sign({exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24, userid: userInQuestion.id, username: userInQuestion.username }, process.env.JWTSECRET)
+
+        res.cookie("ourSimpleApp", ourTokenValue, {
+            httpOnly: true,
+            secure: true,
+            sameSite: "strict",
+            maxAge: 1000 * 60 * 60 * 24
+        })
+
+        res.redirect("/")
+
+
+    })
 
 app.post("/register", (req, res) => {
     const errors = [];
@@ -70,10 +136,16 @@ app.post("/register", (req, res) => {
 
 
         const ourStatement = db.prepare("INSERT INTO users (username, password) VALUES (?, ?)")
-        ourStatement.run(req.body.username, req.body.password)
+        const result = ourStatement.run(req.body.username, req.body.password)
+
+        const lookupStatement = db.prepare("SELECT * FROM users WHERE ROWID = ?")
+        const ourUser = lookupStatement.get(result.lastInsertRowid)
 
         // log the user in by giving them a cookie
-        res.cookie("ourSimpleApp", "supertopsecretvalue", {
+        const ourTokenValue = jwt.sign({exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24, userid: ourUser.id, username: ourUser.username }, process.env.JWTSECRET)
+
+
+        res.cookie("ourSimpleApp", ourTokenValue, {
             // makes sure that client side js cannot access cookie in the browser
             httpOnly: true,
             secure: true,
@@ -83,7 +155,7 @@ app.post("/register", (req, res) => {
             maxAge: 1000 * 60 * 60 * 24
         })
 
-        res.send("Thank you!")
+        res.redirect("/")
     }
 });
 
