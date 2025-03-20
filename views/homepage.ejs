@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="styles.css">
+    <title>Document</title>
+</head>
+<body>
+    <header>
+        <h2><a href="/">Test App</a></h2>
+        <nav>
+            <a href="/login">Log In</a>
+        </nav>
+    </header>
+
+    <main>
+        <form action="/register" method="POST">
+        <% errors.forEach(error => { %> 
+             <p class="notice"><%= error %></p>
+        <% }) %>
+        <fieldset>
+           <legend>Create an account</legend>
+           <label for="username"><small>Username</small></label> 
+           <input type="text" id="username" name="username" autocomplete="off">
+
+           <label for="password"><small>Password</small></label> 
+           <input type="password" id="password" name="password" autocomplete="off">
+           <br>
+           <button>Sign Up</button>
+        </fieldset>
+        </form>
+    </main>
+
+    <footer>
+        <small>&copy; Our Wonderful App</small>
+    </footer>
+    
+</body>
+</html>
