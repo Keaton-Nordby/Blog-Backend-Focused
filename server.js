@@ -1,5 +1,6 @@
 require("dotenv").config()
 const cookieParser = require("cookie-parser")
+const sanitizeHTML = require("sanitize-html")
 const jwt = require("jsonwebtoken")
 const bcrypt = require("bcrypt")
 const express = require("express")
@@ -16,6 +17,18 @@ const createTables = db.transaction(() => {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username STRING NOT NULL UNIQUE,
         password STRING NOT NULL
+        )
+        `).run()
+
+    db.prepare(
+        `
+        CREATE TABLE IF NOT EXISTS posts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        createdDate TEXT,
+        title STRING NOT NULL,
+        body TEXT NOT NULL,
+        authorid INTEGER,
+        FOREIGN KEY (authorid) REFERENCES users (id)
         )
         `).run()
 
@@ -103,9 +116,52 @@ app.post("/login", (req, res) => {
         })
 
         res.redirect("/")
+})
 
+function mustBeLoggedIn(req, res, next) {
+    if (req.user) {
+        return next();
+    }
+    return res.redirect("/");
 
-    })
+}
+
+app.get("/create-post", mustBeLoggedIn, (req, res) => {
+    res.render("create-post");
+})
+
+function sharedPostValidation(req) {
+    const errors = [];
+
+    if (typeof req.body.title !== "string") req.body.title = "";
+    if (typeof req.body.body !== "string") req.body.body = "";
+
+    // trim - sanitize or strip out html
+    req.body.title = sanitizeHTML(req.body.title.trim(), { allowedTags: [], allowedAttributes: {}});
+    req.body.body = sanitizeHTML(req.body.body.trim(), { allowedTags: [], allowedAttributes: {}});
+
+    if (!req.body.title) errors.push("You must provide a title.")
+    if (!req.body.body) errors.push("You must provide a title.")
+
+    return errors
+}
+
+app.post("/create-post", mustBeLoggedIn, (req, res) => {
+    const errors = sharedPostValidation(req);
+
+    if(errors.length) {
+        return res.render("create-post", { errors });
+    }
+
+    // if no errors we save the post into the database
+    const ourStatement = db.prepare("INSERT INTO posts (title, body, authorid, createdDate) VALUES (?, ?, ?, ?)");
+    const result = ourStatement.run(req.body.title, req.body.body, req.user.userid, new Date().toISOString());
+
+    const getPostStatement = db.prepare("SELECT * FROM posts WHERE ROWID = ?");
+    const realPost = getPostStatement.get(result.lastInsertRowid);
+
+    res.redirect(`/post/${realPost.id}`);
+})
 
 app.post("/register", (req, res) => {
     const errors = [];
@@ -119,6 +175,14 @@ app.post("/register", (req, res) => {
     if (req.body.username.length < 3) errors.push("Username must be greater than three characters long.");
     if (req.body.username.length > 10) errors.push("Username must not exceed ten characters.");
     if (!req.body.username.match(/^[a-zA-Z0-9]+$/)) errors.push("Username can only consist of letters and numbers.");
+
+
+    // check if username already exists
+    const usernameStatement = db.prepare("SELECT * FROM users WHERE username = ?");
+    const usernameCheck = usernameStatement.get(req.body.username);
+
+    if (usernameCheck) errors.push("That username is already taken.");
+
 
     if (!req.body.password) errors.push("You must provide a password.");
     if (req.body.password.length < 12) errors.push("Password must be greater than than twelve characters long.");
